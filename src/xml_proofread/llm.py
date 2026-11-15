@@ -17,10 +17,6 @@ from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
-# Verified with client.models.list() + live calls on a free-tier key (Nov 2026):
-# gemini-2.5-flash -> 404 for new users; gemini-3.8/3.7-flash -> 503 / hang under load;
-# gemini-3.5-flash and gemini-3.1-flash-lite answer in ~4 s. The chain falls through on
-# 404 / 503 / timeout, so a retired or overloaded model never breaks a run.
 DEFAULT_MODEL = "gemini-3.5-flash,gemini-3.8-flash,gemini-3.1-flash-lite"
 REQUEST_TIMEOUT_S = 90
 
@@ -31,8 +27,6 @@ class Issue(BaseModel):
     original: str
     correction: str
     type: ErrorType
-    # Required in the schema (the prompt demands a reason for every error). Code still
-    # treats "" as "no reason" and then omits the attribute.
     reason: str
 
 
@@ -138,7 +132,6 @@ _EXAMPLE_OUT = {"results": [
 
 
 def build_system_prompt(style_guide: str) -> str:
-    # Static, byte-stable prefix (guide first) so implicit caching can apply across requests.
     return (
         "HOUSE STYLE GUIDE\n=================\n" + style_guide + "\n\n" + _RULES
         + "\nEXAMPLE INPUT\n" + json.dumps(_EXAMPLE_IN, ensure_ascii=False)
@@ -151,12 +144,9 @@ def build_user_prompt(lang: str, paragraphs: list[tuple[int, str]]) -> str:
     return f"Locale: {lang}\nParagraphs:\n{json.dumps(items, ensure_ascii=False)}"
 
 
-# ---------------------------------------------------------------------- client
-
-
 @dataclass
 class Usage:
-    model: str = ""  # model that served the last successful request
+    model: str = ""
     requests: int = 0
     failed_requests: int = 0
     prompt_tokens: int = 0
@@ -196,8 +186,6 @@ class Proofreader:
     style_guide: str
     lang: str
     model: str = DEFAULT_MODEL  # comma-separated fallback chain
-    # Measured on sample_input.xml: "low" ~29 s and occasionally contradicts the guide
-    # (toward -> towards); "medium" ~40 s with no such errors across runs.
     thinking: Literal["low", "medium", "high"] = "medium"
     concurrency: int = 2
     rpm: int = 10
@@ -211,7 +199,6 @@ class Proofreader:
         self._client = genai.Client(
             api_key=self.api_key,
             http_options=types.HttpOptions(
-                # SDK-level retry with exponential backoff + jitter on rate limit / server errors.
                 retry_options=types.HttpRetryOptions(
                     attempts=4, initial_delay=2.0, max_delay=30.0,
                     http_status_codes=[408, 429, 500, 502, 503, 504],
@@ -222,7 +209,7 @@ class Proofreader:
         self.models = [m.strip() for m in self.model.split(",") if m.strip()]
         if not self.models:
             raise ValueError("no model given")
-        self._active = 0  # index into self.models; sticky once a fallback happens
+        self._active = 0
         self._system = build_system_prompt(self.style_guide)
         self._sem = asyncio.Semaphore(self.concurrency)
         self._limiter = RateLimiter(self.rpm)
@@ -238,7 +225,6 @@ class Proofreader:
             response_mime_type="application/json",
             response_schema=BatchResult,
         )
-        # Gemini 3 takes a thinking level; 2.5 takes a token budget (-1 = dynamic).
         if model.startswith("gemini-2.5"):
             budget = {"low": 0 if "pro" not in model else 128, "medium": 2048, "high": -1}[self.thinking]
             cfg["thinking_config"] = t.ThinkingConfig(thinking_budget=budget)
@@ -262,7 +248,6 @@ class Proofreader:
                 async with self._sem:
                     await self._limiter.wait()
                     self.usage.requests += 1
-                    # The SDK timeout covers one HTTP attempt; this bounds the whole retry loop.
                     resp = await asyncio.wait_for(
                         self._client.aio.models.generate_content(
                             model=model, contents=prompt, config=self._config(model)
@@ -271,10 +256,10 @@ class Proofreader:
                     )
                 self.usage.model = model
                 return resp
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 if not self._model_unavailable(e) or idx + 1 >= len(self.models):
                     raise
-                if self._active == idx:  # another task may already have switched
+                if self._active == idx:
                     self._active = idx + 1
                     log.warning("model %s unavailable (%s); falling back to %s",
                                 model, getattr(e, "code", type(e).__name__), self.models[idx + 1])
@@ -296,7 +281,7 @@ class Proofreader:
         wanted = {i for i, _ in paragraphs}
         try:
             out = await self._call(paragraphs)
-        except Exception as e:  # noqa: BLE001 - any API/parse failure triggers the fallback
+        except Exception as e:
             self.usage.failed_requests += 1
             log.warning("batch %s failed (%s: %s)", sorted(wanted), type(e).__name__, e)
             out = {}

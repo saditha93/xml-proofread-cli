@@ -16,8 +16,8 @@ from . import xmlio
 log = logging.getLogger(__name__)
 
 try:
-    import resource  # not available on Windows
-except ImportError:  # pragma: no cover
+    import resource
+except ImportError:
     resource = None
 
 
@@ -26,7 +26,6 @@ def peak_rss_mb() -> float | None:
     if resource is None:
         return None
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    # Linux reports KB, macOS reports bytes.
     return rss / (1024 * 1024) if sys.platform == "darwin" else rss / 1024
 
 
@@ -62,7 +61,6 @@ class FileStats:
         return sum(self.errors_by_type.values())
 
     def as_dict(self) -> dict:
-        # asdict() would rebuild Counters from (key, value) tuples, so copy them as plain dicts.
         d = {k: (dict(v) if isinstance(v, Counter) else v) for k, v in vars(self).items()}
         d["errors"] = self.errors
         d["seconds"] = round(self.seconds, 3)

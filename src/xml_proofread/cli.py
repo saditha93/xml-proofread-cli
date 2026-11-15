@@ -113,7 +113,6 @@ async def _run(files: list[Path], proofreader: llm.Proofreader, batch_size: int)
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    # Third-party libraries log at WARNING (DEBUG with -v); our own logger at INFO.
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",

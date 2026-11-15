@@ -52,7 +52,6 @@ def _format(p: ET.Element, text: str) -> str:
     centered = ppr is not None and ppr.find(f"{W}jc[@{W}val='center']") is not None
     runs = [r for r in p.iter(W + "r") if r.find(W + "t") is not None]
     all_bold = bool(runs) and all(r.find(f"{W}rPr/{W}b") is not None for r in runs)
-    # Top-level sections in the guide are hand-formatted (centered + bold), not styled.
     if style == "Title" or (centered and all_bold and not text.endswith(":")):
         return f"# {text}"
     m = _HEADING.search(style)
@@ -80,7 +79,6 @@ def load_style_guide(path: str | Path) -> str:
     if body is None:
         raise StyleGuideError(f"style guide {path} has no document body")
 
-    # Table cells are emitted as plain lines (no table layout). Good enough for rule text.
     lines = []
     for p in body.iter(W + "p"):
         text = _paragraph_text(p)

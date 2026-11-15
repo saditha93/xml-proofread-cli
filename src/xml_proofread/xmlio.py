@@ -22,11 +22,11 @@ from typing import Protocol
 from lxml import etree
 
 _PARSER_OPTS = dict(
-    strip_cdata=False,  # keep CDATA sections as-is
-    remove_blank_text=False,  # keep all whitespace
+    strip_cdata=False,
+    remove_blank_text=False,
     remove_comments=False,
     remove_pis=False,
-    resolve_entities=False,  # XXE protection
+    resolve_entities=False,
     no_network=True,
     huge_tree=True,
 )
@@ -39,15 +39,11 @@ class IssueLike(Protocol):
     type: str
     reason: str | None
 
-
-# --------------------------------------------------------------------------- I/O
-
-
 @dataclass
 class Document:
     tree: etree._ElementTree
     encoding: str
-    prolog: bytes  # BOM + original XML declaration + whitespace after it, kept verbatim
+    prolog: bytes
     trailing_newline: bool
 
 
@@ -67,7 +63,6 @@ def load(path: str | Path) -> Document:
 
 
 def serialize(doc: Document) -> bytes:
-    # lxml would rewrite the declaration (single quotes), so we emit the original one.
     body = etree.tostring(doc.tree, encoding=doc.encoding, xml_declaration=False)
     out = doc.prolog + body
     if doc.trailing_newline and not out.endswith(b"\n"):
@@ -87,10 +82,6 @@ def save(doc: Document, path: str | Path) -> None:
         Path(tmp).unlink(missing_ok=True)
         raise
 
-
-# ------------------------------------------------------------------ paragraphs
-
-
 def _is_p(el) -> bool:
     return isinstance(el.tag, str) and etree.QName(el).localname == "p"
 
@@ -98,9 +89,9 @@ def _is_p(el) -> bool:
 @dataclass
 class Paragraph:
     element: etree._Element
-    segments: list[tuple[etree._Element, str]]  # (node, "text" | "tail") in reading order
-    text: str  # text owned by this <p> (nested <p> excluded); what the LLM sees
-    full_text: str  # "".join(itertext()) snapshot, used for the invariant check
+    segments: list[tuple[etree._Element, str]]
+    text: str
+    full_text: str
     has_cdata: bool
 
 
@@ -109,11 +100,10 @@ def _segments(p) -> list[tuple[etree._Element, str]]:
 
     def walk(parent):
         for child in parent:
-            # Nested <p> is its own unit; comments/PIs/entities have no text content.
             if isinstance(child.tag, str) and not _is_p(child):
                 segs.append((child, "text"))
                 walk(child)
-            segs.append((child, "tail"))  # a child's tail always belongs to `parent`
+            segs.append((child, "tail"))
 
     walk(p)
     return segs
@@ -141,10 +131,6 @@ def find_paragraphs(doc: Document) -> list[Paragraph]:
             )
         )
     return out
-
-
-# ------------------------------------------------------------- span location
-
 
 @dataclass
 class Span:
@@ -230,7 +216,7 @@ def locate_spans(text: str, issues: list[IssueLike]) -> tuple[list[Span], Counte
             continue
 
         found = None
-        seen = set()  # why candidates were rejected
+        seen = set()
         for pattern in (re.escape(orig), _fuzzy_pattern(orig)):
             for start in (cursor, 0):
                 for m in re.finditer(pattern, text[start:]):
@@ -238,7 +224,6 @@ def locate_spans(text: str, issues: list[IssueLike]) -> tuple[list[Span], Counte
                     if not free(s, e):
                         seen.add("overlap")
                     elif any(qa <= s and e <= qb for qa, qb in quoted):
-                        # Never edit quoted material; keep looking for an unquoted occurrence.
                         seen.add("inside_quotation")
                     else:
                         found = (s, e)
@@ -259,10 +244,6 @@ def locate_spans(text: str, issues: list[IssueLike]) -> tuple[list[Span], Counte
     spans.sort(key=lambda sp: sp.start)
     return spans, drops
 
-
-# ------------------------------------------------------------------- injection
-
-
 class InvariantError(Exception):
     """Text content changed during injection (should never happen)."""
 
@@ -271,7 +252,6 @@ def _make_error(parent, tag: str, issue: IssueLike, text: str):
     attrib = {"type": issue.type, "correction": issue.correction}
     if issue.reason:
         attrib["reason"] = issue.reason
-    # SubElement (not Element) so the new node reuses the parent's namespace declarations.
     el = etree.SubElement(parent, tag, attrib)
     el.text = text
     return el
@@ -307,7 +287,6 @@ def annotate(para: Paragraph, issues: list[IssueLike]) -> AnnotateResult:
     if not spans:
         return result
 
-    # Assign spans to segments; a span crossing inline markup cannot be wrapped.
     bounds, off = [], 0
     for seg in para.segments:
         n = len(_seg_value(seg))
@@ -328,7 +307,6 @@ def annotate(para: Paragraph, issues: list[IssueLike]) -> AnnotateResult:
     p = para.element
     q = etree.QName(p)
     error_tag = f"{{{q.namespace}}}error" if q.namespace else "error"
-    # Backup for the invariant check below. Paragraphs are short, so the copy is cheap.
     backup = copy.deepcopy(p)
     for idx, seg_spans in per_seg.items():
         _inject_segment(para.segments[idx], error_tag, seg_spans)
