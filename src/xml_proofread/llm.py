@@ -185,7 +185,7 @@ class Proofreader:
     api_key: str
     style_guide: str
     lang: str
-    model: str = DEFAULT_MODEL  # comma-separated fallback chain
+    model: str = DEFAULT_MODEL
     thinking: Literal["low", "medium", "high"] = "medium"
     concurrency: int = 2
     rpm: int = 10
@@ -203,7 +203,7 @@ class Proofreader:
                     attempts=4, initial_delay=2.0, max_delay=30.0,
                     http_status_codes=[408, 429, 500, 502, 503, 504],
                 ),
-                timeout=REQUEST_TIMEOUT_S * 1000,  # ms
+                timeout=REQUEST_TIMEOUT_S * 1000,
             ),
         )
         self.models = [m.strip() for m in self.model.split(",") if m.strip()]
