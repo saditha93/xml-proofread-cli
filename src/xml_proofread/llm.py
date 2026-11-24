@@ -39,8 +39,6 @@ class BatchResult(BaseModel):
     results: list[ParagraphResult]
 
 
-# ---------------------------------------------------------------------- prompt
-
 _RULES = """\
 You are a meticulous professional copy editor for a legal and business publisher.
 
